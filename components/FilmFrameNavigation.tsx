@@ -1,45 +1,38 @@
 'use client';
 
 import { useAppStore } from '@/lib/store';
-import { Upload, Settings, Palette, FileOutput, Zap } from 'lucide-react';
+import { Loader, Palette, FileOutput, Zap, Film } from 'lucide-react';
 import { formatDuration } from '@/lib/utils';
 import { Tooltip, Button, Progress, Spinner } from 'flowbite-react';
 
 const steps = [
 	{
 		id: 1,
-		label: 'Input',
-		icon: Upload,
-		description: 'Upload video file',
+		label: 'Import',
+		icon: Loader,
+		description: 'Load video file',
 		color: 'blue',
-		isUploading: false, // This will be managed by the store in the future
+		isLoading: false,
 	},
 	{
 		id: 2,
-		label: 'Frames',
-		icon: Settings,
+		label: 'Select',
+		icon: Film,
 		description: 'Select frame extraction settings',
 		color: 'purple',
 	},
 	{
 		id: 3,
-		label: 'Style',
+		label: 'Edit',
 		icon: Palette,
 		description: 'Configure layout and styling',
 		color: 'pink',
 	},
 	{
 		id: 4,
-		label: 'Format',
+		label: 'Export',
 		icon: FileOutput,
-		description: 'Choose output format',
-		color: 'cyan',
-	},
-	{
-		id: 5,
-		label: 'Generate',
-		icon: Zap,
-		description: 'Generate contact sheet',
+		description: 'Choose output format and generate contact sheet',
 		color: 'green',
 	},
 ];
@@ -49,8 +42,8 @@ export default function FilmFrameNavigation() {
 		currentStep,
 		stepsCompleted,
 		videoMetadata,
-		isUploading,
-		uploadProgress,
+		isAnalyzing,
+		analysisError,
 		setCurrentStep,
 	} = useAppStore();
 
@@ -89,8 +82,8 @@ export default function FilmFrameNavigation() {
 	};
 
 	const renderStepIcon = (step: any, isActive: boolean) => {
-		// Show spinner or progress for upload step when uploading
-		if (step.id === 1 && isUploading) {
+		// Show spinner or progress for load step when analyzing
+		if (step.id === 1 && isAnalyzing) {
 			return <Spinner size="sm" />;
 		}
 
@@ -145,11 +138,11 @@ export default function FilmFrameNavigation() {
 												</div>
 											</Button>
 
-											{/* Upload progress indicator */}
-											{step.id === 1 && isUploading && (
+											{/* Analysis progress indicator */}
+											{step.id === 1 && isAnalyzing && (
 												<div className="mt-2 w-full max-w-[80px]">
 													<Progress
-														progress={uploadProgress}
+														progress={50}
 														size="sm"
 														color="blue"
 													/>

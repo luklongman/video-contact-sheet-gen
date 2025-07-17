@@ -24,10 +24,10 @@ This document details the requirements for a Single Page Application (SPA) that 
 
 4. User Flow & Features
 
-This section outlines the user's journey from uploading a video to downloading the final contact sheet.
-Phase 1: Video Upload & Analysis
+This section outlines the user's journey from loading a video to downloading the final contact sheet.
+Phase 1: Video Load & Analysis
 
-    File Selection: The user is prompted to upload a video file via a "Choose File" button or a drag-and-drop zone.
+    File Selection: The user is prompted to load a video file via a "Choose File" button or a drag-and-drop zone.
 
     Initial Validation: The application accepts standard video formats supported by FFmpeg (MP4, WebM, MOV, etc.).
 
@@ -160,7 +160,7 @@ Phase 3: Generation & Download
 
     Advanced Frame Selection: Options to extract frames based on scene detection or only I-frames (keyframes).
 
-    Batch Processing: Support for uploading and processing multiple videos in a queue.
+    Batch Processing: Support for loading and processing multiple videos in a queue.
 
     PDF Export: Implement a PDF output option using a library like pdf-lib.
 

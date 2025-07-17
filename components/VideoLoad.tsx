@@ -6,24 +6,18 @@ import { useAppStore } from '@/lib/store';
 import { Card, Button, Badge, Progress, Alert } from 'flowbite-react';
 import { videoAnalyzer } from '@/lib/videoAnalysis';
 
-export default function VideoUpload() {
+export default function VideoLoad() {
   const { 
     videoFile, 
     isAnalyzing, 
     analysisError, 
-    isUploading,
-    uploadProgress,
-    uploadStatus,
+    videoMetadata,
     setVideoFile, 
     setAnalyzing, 
     setAnalysisError,
-    setUploading,
-    setUploadProgress,
-    setUploadStatus,
-    resetState,
     setStepCompleted,
-    goToNextStep,
-    setVideoMetadata
+    setVideoMetadata,
+    resetState
   } = useAppStore();
 
   const handleFileSelect = useCallback(async (file: File) => {
@@ -39,51 +33,49 @@ export default function VideoUpload() {
       return;
     }
 
+    // Check for common video formats
+    const supportedFormats = ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv', 'm4v', 'flv', 'wmv', 'ogv', '3gp', 'ts', 'mts', 'mxf'];
+    const fileExtension = file.name.split('.').pop()?.toLowerCase();
+    
+    if (!fileExtension || !supportedFormats.includes(fileExtension)) {
+      setAnalysisError(`Unsupported file format: ${fileExtension}. Please try MP4, WebM, MOV, AVI, MKV or other common video formats.`);
+      return;
+    }
+
     setVideoFile(file);
     setAnalysisError(null);
     setAnalyzing(true);
     
     try {
-      // Step 1: Get basic metadata quickly using HTML5 video element
-      const basicMetadata = await videoAnalyzer.getBasicMetadata(file);
-      setVideoMetadata(basicMetadata);
-      setStepCompleted(1, true);
-      setAnalyzing(false);
-      
-      // Move to next step immediately
-      goToNextStep();
-      
-      // Step 2: Start background processing for detailed metadata
-      setUploading(true);
-      setUploadProgress(0);
-      setUploadStatus('Loading FFmpeg library...');
-      
-      // Run detailed analysis in background
-      const detailedMetadata = await videoAnalyzer.updateMetadataWithDetails(file, basicMetadata, (progress) => {
-        setUploadProgress(Math.round(progress * 100));
-        setUploadStatus(progress === 0 ? 'Loading FFmpeg library...' : 'Analyzing video details...');
+      // Get metadata using FFmpeg.wasm for better compatibility
+      const metadata = await videoAnalyzer.getBasicMetadata(file, (progress) => {
+        // Progress callback could be used to update UI if needed
+        console.log('Analysis progress:', Math.round(progress * 100) + '%');
       });
       
-      // Update with detailed metadata
-      setVideoMetadata(detailedMetadata);
-      setUploadStatus('Video analysis complete');
+      setVideoMetadata(metadata);
+      setStepCompleted(1, true);
       
     } catch (error) {
       console.error('Video analysis failed:', error);
-      if (isAnalyzing) {
-        // If we failed during basic analysis, show error and don't proceed
-        setAnalysisError('Failed to analyze video. Please try a different file.');
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      
+      // Provide helpful error messages based on common issues
+      if (errorMessage.includes('Failed to initialize FFmpeg')) {
+        setAnalysisError('Failed to load video processor. Please check your internet connection and try again.');
+      } else if (errorMessage.includes('corrupted or in an unsupported format')) {
+        setAnalysisError('This video file appears to be corrupted or in an unsupported format. Please try a different file.');
+      } else if (errorMessage.includes('Invalid video metadata')) {
+        setAnalysisError('Could not extract video information. The file may be corrupted.');
+      } else if (errorMessage.includes('No such file')) {
+        setAnalysisError('Video file could not be processed. Please try a different file.');
       } else {
-        // If we failed during detailed analysis, just log it - user can still proceed
-        console.warn('Detailed video analysis failed, using basic metadata');
-        setUploadStatus('Using basic video information');
+        setAnalysisError('Failed to analyze video. Please try a different file or check if the video is corrupted.');
       }
     } finally {
       setAnalyzing(false);
-      setUploading(false);
-      setUploadProgress(0);
     }
-  }, [setVideoFile, setAnalyzing, setAnalysisError, setUploading, setUploadProgress, setUploadStatus, setVideoMetadata, setStepCompleted, goToNextStep]);
+  }, [setVideoFile, setAnalyzing, setAnalysisError, setVideoMetadata, setStepCompleted]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -128,7 +120,7 @@ export default function VideoUpload() {
             color="failure"
             size="sm"
             onClick={handleRemoveFile}
-            disabled={isAnalyzing || isUploading}
+            disabled={isAnalyzing}
             title="Remove file"
           >
             <X className="w-4 h-4" />
@@ -154,22 +146,22 @@ export default function VideoUpload() {
           </div>
         )}
         
-        {isUploading && (
+        {videoMetadata && !isAnalyzing && (
           <div className="mt-6 p-4 bg-green-50 rounded-lg">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-green-600"></div>
-              <span className="text-sm font-medium text-green-600">
-                {uploadStatus}
-              </span>
+            <h4 className="font-medium text-green-800 mb-3">Video Information</h4>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div className="text-gray-600">Duration:</div>
+              <div className="font-medium">{formatDuration(videoMetadata.duration)}</div>
+              
+              <div className="text-gray-600">Resolution:</div>
+              <div className="font-medium">{videoMetadata.width} × {videoMetadata.height}</div>
+              
+              <div className="text-gray-600">Codec:</div>
+              <div className="font-medium">{videoMetadata.codec}</div>
+              
+              <div className="text-gray-600">Frame Rate:</div>
+              <div className="font-medium">{videoMetadata.fps.toFixed(2)} fps</div>
             </div>
-            <Progress 
-              progress={uploadProgress} 
-              color="green" 
-              size="sm"
-            />
-            <p className="text-xs text-gray-600 mt-2">
-              Processing in background - you can continue to the next step
-            </p>
           </div>
         )}
         
@@ -188,7 +180,7 @@ export default function VideoUpload() {
         <div className="p-2 bg-blue-100 rounded-lg">
           <Upload className="w-6 h-6 text-blue-600" />
         </div>
-        <h2 className="text-xl font-semibold">Upload Video</h2>
+        <h2 className="text-xl font-semibold">Load Video</h2>
       </div>
       
       <div 
@@ -213,7 +205,7 @@ export default function VideoUpload() {
           Drop your video file here or click to browse
         </p>
         <p className="text-sm text-gray-600 mb-4">
-          Supports MP4, WebM, MOV and other common formats
+          Supports MP4, WebM, MOV, AVI, MKV, FLV, WMV and other common formats
         </p>
         <div className="flex items-center justify-center gap-2">
           <Badge color="gray" size="sm">
@@ -240,4 +232,16 @@ export default function VideoUpload() {
       )}
     </Card>
   );
+}
+
+function formatDuration(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  } else {
+    return `${minutes}:${secs.toString().padStart(2, '0')}`;
+  }
 }

@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect } from 'react';
-import { Hash, Clock, Info } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { Hash, Info, ArrowRightFromLine, ArrowLeftFromLine, Film } from 'lucide-react';
 import { useAppStore } from '@/lib/store';
-import { Card, Label, TextInput, Button, Alert, Badge, ToggleSwitch } from 'flowbite-react';
+import { Card, Label, TextInput, Button, Alert, ToggleSwitch } from 'flowbite-react';
+import DualRangeSlider from './DualRangeSlider';
 
 export default function FrameSelectionSettings() {
   const { 
@@ -15,97 +16,114 @@ export default function FrameSelectionSettings() {
     goToNextStep
   } = useAppStore();
 
-  // Helper function to format seconds to hh:mm:ss:ms
+  const [useTimeFormat, setUseTimeFormat] = useState(false);
+
+  // Helper function to format seconds to HH:MM:SS.ms
   const formatTime = useCallback((seconds: number) => {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
     const ms = Math.floor((seconds % 1) * 1000);
     
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}:${ms.toString().padStart(3, '0')}`;
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
   }, []);
 
-  // Helper function to parse hh:mm:ss:ms to seconds
+  // Helper function to parse HH:MM:SS.ms to seconds
   const parseTime = useCallback((timeStr: string) => {
     const parts = timeStr.split(':');
-    if (parts.length !== 4) return 0;
+    if (parts.length !== 3) return 0;
     
     const hours = parseInt(parts[0]) || 0;
     const minutes = parseInt(parts[1]) || 0;
-    const seconds = parseInt(parts[2]) || 0;
-    const ms = parseInt(parts[3]) || 0;
+    const secondsParts = parts[2].split('.');
+    const seconds = parseInt(secondsParts[0]) || 0;
+    const ms = parseInt(secondsParts[1]) || 0;
     
     return hours * 3600 + minutes * 60 + seconds + ms / 1000;
   }, []);
+
+  // Convert frame to time
+  const frameToTime = useCallback((frame: number) => {
+    if (!videoMetadata) return 0;
+    return frame / videoMetadata.fps;
+  }, [videoMetadata]);
+
+  // Convert time to frame
+  const timeToFrame = useCallback((time: number) => {
+    if (!videoMetadata) return 0;
+    return Math.floor(time * videoMetadata.fps);
+  }, [videoMetadata]);
+
+  // Set default values when video metadata is loaded
+  useEffect(() => {
+    if (videoMetadata && frameSelection.endFrame === 0) {
+      const maxFrames = Math.floor(videoMetadata.duration * videoMetadata.fps);
+      const defaultFrameLimit = Math.min(100, maxFrames);
+      
+      updateFrameSelection({
+        startFrame: 0,
+        endFrame: maxFrames,
+        startTime: 0,
+        endTime: videoMetadata.duration,
+        frameLimit: defaultFrameLimit
+      });
+    }
+  }, [videoMetadata, frameSelection.endFrame, updateFrameSelection]);
 
   const handleTimeChange = useCallback((field: 'startTime' | 'endTime', value: string) => {
     if (!videoMetadata) return;
     
     const timeInSeconds = parseTime(value);
-    const updates: any = { [field]: timeInSeconds };
+    const maxTime = videoMetadata.duration;
+    const clampedTime = Math.max(0, Math.min(timeInSeconds, maxTime));
+    
+    const updates: any = { [field]: clampedTime };
     
     // Update corresponding frame number
     if (field === 'startTime') {
-      updates.startFrame = Math.floor(timeInSeconds * videoMetadata.fps);
+      updates.startFrame = timeToFrame(clampedTime);
     } else {
-      updates.endFrame = Math.floor(timeInSeconds * videoMetadata.fps);
+      updates.endFrame = timeToFrame(clampedTime);
     }
     
     updateFrameSelection(updates);
-  }, [videoMetadata, updateFrameSelection, parseTime]);
+  }, [videoMetadata, updateFrameSelection, parseTime, timeToFrame]);
 
   const handleFrameChange = useCallback((field: 'startFrame' | 'endFrame', value: string) => {
     const frameNumber = parseInt(value);
     if (isNaN(frameNumber) || !videoMetadata) return;
     
-    const updates: any = { [field]: frameNumber };
+    const maxFrames = Math.floor(videoMetadata.duration * videoMetadata.fps);
+    const clampedFrame = Math.max(0, Math.min(frameNumber, maxFrames));
+    
+    const updates: any = { [field]: clampedFrame };
     
     // Update corresponding time
     if (field === 'startFrame') {
-      updates.startTime = frameNumber / videoMetadata.fps;
+      updates.startTime = frameToTime(clampedFrame);
     } else {
-      updates.endTime = frameNumber / videoMetadata.fps;
+      updates.endTime = frameToTime(clampedFrame);
     }
     
     updateFrameSelection(updates);
-  }, [videoMetadata, updateFrameSelection]);
+  }, [videoMetadata, updateFrameSelection, frameToTime]);
 
-  const handleIntervalToggle = useCallback((enabled: boolean) => {
-    if (enabled) {
-      // Enable interval extraction - set to extract every 30 frames or 1 second
-      updateFrameSelection({ 
-        intervalMode: 'frames',
-        intervalValue: 30
-      });
-    } else {
-      // Disable interval extraction - extract every frame
-      updateFrameSelection({ 
-        intervalMode: 'frames',
-        intervalValue: 1
-      });
-    }
-  }, [updateFrameSelection]);
-
-  const handleIntervalValueChange = useCallback((value: string, mode: 'frames' | 'seconds') => {
-    const numValue = mode === 'frames' ? parseInt(value) : parseFloat(value);
+  const handleIntervalValueChange = useCallback((value: string) => {
+    const numValue = parseInt(value);
     if (isNaN(numValue) || numValue <= 0) return;
     
-    // Update both the mode and value
-    updateFrameSelection({ 
-      intervalMode: mode,
-      intervalValue: numValue 
-    });
-  }, [updateFrameSelection]);
-
-  const handleFrameLimitToggle = useCallback((enabled: boolean) => {
-    updateFrameSelection({ useFrameLimit: enabled });
+    updateFrameSelection({ intervalValue: numValue });
   }, [updateFrameSelection]);
 
   const handleFrameLimitChange = useCallback((value: string) => {
     const numValue = parseInt(value);
-    if (isNaN(numValue) || numValue <= 0) return;
-    updateFrameSelection({ frameLimit: numValue });
-  }, [updateFrameSelection]);
+    if (isNaN(numValue) || numValue <= 0 || !videoMetadata) return;
+    
+    const maxFrames = Math.floor(videoMetadata.duration * videoMetadata.fps);
+    const clampedLimit = Math.max(1, Math.min(numValue, maxFrames));
+    
+    updateFrameSelection({ frameLimit: clampedLimit });
+  }, [updateFrameSelection, videoMetadata]);
 
   // Validation function
   const validateFrameSelection = useCallback(() => {
@@ -116,262 +134,240 @@ export default function FrameSelectionSettings() {
                         frameSelection.startFrame >= 0 && 
                         frameSelection.endFrame <= maxFrames;
     const isValidInterval = frameSelection.intervalValue > 0;
-    const isValidLimit = !frameSelection.useFrameLimit || (frameSelection.frameLimit && frameSelection.frameLimit > 0);
+    const isValidLimit = frameSelection.frameLimit > 0 && frameSelection.frameLimit <= maxFrames;
     
     return isValidRange && isValidInterval && isValidLimit;
   }, [videoMetadata, frameSelection]);
 
-  // Update step completion when validation changes
+  // Auto-complete step when valid
   useEffect(() => {
     const isValid = validateFrameSelection();
     setStepCompleted(2, !!isValid);
   }, [frameSelection, validateFrameSelection, setStepCompleted]);
 
-  if (!videoMetadata) return null;
+  const handleContinue = useCallback(() => {
+    if (validateFrameSelection()) {
+      goToNextStep();
+    }
+  }, [validateFrameSelection, goToNextStep]);
+
+  if (!videoMetadata) {
+    return (
+      <Card className="w-full">
+        <Alert color="warning" icon={Info}>
+          <span className="font-medium">No video loaded!</span> Please load a video first.
+        </Alert>
+      </Card>
+    );
+  }
 
   const maxFrames = Math.floor(videoMetadata.duration * videoMetadata.fps);
   const endFrame = frameSelection.endFrame || maxFrames;
   const hasValidationError = !validateFrameSelection();
-  
-  // Determine if interval extraction is enabled
-  const useIntervalExtraction = frameSelection.intervalMode === 'frames' ? 
-    frameSelection.intervalValue > 1 : 
-    frameSelection.intervalValue !== (1 / videoMetadata.fps);
+  const framesToExtractCalculated = Math.ceil((endFrame - frameSelection.startFrame + 1) / frameSelection.intervalValue);
+  const isLimitActive = frameSelection.frameLimit < maxFrames;
 
   return (
     <Card className="w-full">
       <div className="space-y-6">
-        
-        {/* From Section */}
-        <Card className="bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-            <h3 className="text-lg font-semibold text-blue-700 dark:text-blue-300">From</h3>
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-blue-100 rounded-lg">
+            <Film className="w-5 h-5 text-blue-600" />
           </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Start Frame */}
-            <div>
-              <Label htmlFor="startFrame" className="flex items-center gap-2 mb-2">
-                <Hash className="w-4 h-4" />
-                Start Frame
-              </Label>
-              <TextInput
-                id="startFrame"
-                type="number"
-                min="0"
-                max={maxFrames}
-                value={frameSelection.startFrame || ''}
-                onChange={(e) => handleFrameChange('startFrame', e.target.value)}
-                color={hasValidationError && (frameSelection.startFrame < 0 || frameSelection.startFrame > frameSelection.endFrame) ? 'failure' : 'gray'}
-                placeholder="0"
-              />
-            </div>
-            
-            {/* Start Time */}
-            <div>
-              <Label htmlFor="startTime" className="flex items-center gap-2 mb-2">
-                <Clock className="w-4 h-4" />
-                Start Time
-              </Label>
-              <TextInput
-                id="startTime"
-                type="text"
-                value={formatTime(frameSelection.startTime)}
-                onChange={(e) => handleTimeChange('startTime', e.target.value)}
-                placeholder="00:00:00:000"
-              />
-              <p className="text-sm text-gray-500 mt-1">Format: hh:mm:ss:ms</p>
-            </div>
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Select frames</h2>
           </div>
-        </Card>
+        </div>
 
-        {/* To Section */}
-        <Card className="bg-gradient-to-r from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-            <h3 className="text-lg font-semibold text-green-700 dark:text-green-300">To</h3>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* End Frame */}
-            <div>
-              <Label htmlFor="endFrame" className="flex items-center gap-2 mb-2">
-                <Hash className="w-4 h-4" />
-                End Frame (inclusive)
-              </Label>
-              <TextInput
-                id="endFrame"
-                type="number"
-                min={frameSelection.startFrame}
-                max={maxFrames}
-                value={endFrame || ''}
-                onChange={(e) => handleFrameChange('endFrame', e.target.value)}
-                placeholder={maxFrames.toString()}
+        {/* Time/Frame Range Selection */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500">Frame</span>
+              <ToggleSwitch 
+                checked={useTimeFormat} 
+                onChange={setUseTimeFormat}
               />
-            </div>
-            
-            {/* End Time */}
-            <div>
-              <Label htmlFor="endTime" className="flex items-center gap-2 mb-2">
-                <Clock className="w-4 h-4" />
-                End Time
-              </Label>
-              <TextInput
-                id="endTime"
-                type="text"
-                value={formatTime(frameSelection.endTime || videoMetadata.duration)}
-                onChange={(e) => handleTimeChange('endTime', e.target.value)}
-                placeholder={formatTime(videoMetadata.duration)}
-              />
-              <p className="text-sm text-gray-500 mt-1">Format: hh:mm:ss:ms</p>
+              <span className="text-xs text-gray-500">Time</span>
             </div>
           </div>
-        </Card>
 
-        {/* Interval Toggle */}
-        <Card className="bg-gradient-to-r from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
-            <h3 className="text-lg font-semibold text-purple-700 dark:text-purple-300">Extraction Interval</h3>
-          </div>
+          {/* Dual Range Slider */}
           
-          <div className="flex items-center gap-4 mb-4">
-            <ToggleSwitch
-              checked={useIntervalExtraction}
-              onChange={handleIntervalToggle}
-              label={useIntervalExtraction ? 'Extract with interval' : 'Extract every frame'}
-            />
+
+          {/* Start/End Inputs */}
+          <div className="grid grid-cols-2 gap-4">
             <div>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                {useIntervalExtraction 
-                  ? 'Skip frames based on your interval settings' 
-                  : 'Extract all frames within the selected range'
-                }
-              </p>
-            </div>
-          </div>
-          
-          {useIntervalExtraction && (
-            <Card className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Frame Interval */}
+              <Label htmlFor="start" className="flex items-center gap-2 mb-2">
+                <ArrowRightFromLine className="w-4 h-4" />
+                Start {useTimeFormat ? 'Time' : 'Frame'}
+              </Label>
+              {useTimeFormat ? (
                 <div>
-                  <Label htmlFor="frameInterval" className="flex items-center gap-2 mb-2">
-                    <Hash className="w-4 h-4" />
-                    Every X frames
-                  </Label>
                   <TextInput
-                    id="frameInterval"
-                    type="number"
-                    min="1"
-                    value={frameSelection.intervalMode === 'frames' ? frameSelection.intervalValue : Math.round(frameSelection.intervalValue * videoMetadata.fps)}
-                    onChange={(e) => handleIntervalValueChange(e.target.value, 'frames')}
-                    placeholder="1"
+                    id="start"
+                    type="text"
+                    value={formatTime(frameSelection.startTime)}
+                    onChange={(e) => handleTimeChange('startTime', e.target.value)}
+                    placeholder="00:00:00.000"
+                    color={frameSelection.startTime > frameSelection.endTime ? 'failure' : 'gray'}
                   />
                 </div>
-                
-                {/* Time Interval */}
+                ) : (
                 <div>
-                  <Label htmlFor="timeInterval" className="flex items-center gap-2 mb-2">
-                    <Clock className="w-4 h-4" />
-                    Every X seconds
-                  </Label>
                   <TextInput
-                    id="timeInterval"
-                    type="number"
-                    step="0.1"
-                    min="0.1"
-                    value={frameSelection.intervalMode === 'seconds' ? frameSelection.intervalValue : (frameSelection.intervalValue / videoMetadata.fps).toFixed(1)}
-                    onChange={(e) => handleIntervalValueChange(e.target.value, 'seconds')}
-                    placeholder="1.0"
+                  id="start"
+                  type="number"
+                  min="0"
+                  max={maxFrames}
+                  value={frameSelection.startFrame}
+                  onChange={(e) => handleFrameChange('startFrame', e.target.value)}
+                  placeholder="0"
+                  color={frameSelection.startFrame > frameSelection.endFrame ? 'failure' : 'gray'}
                   />
                 </div>
+                )}
               </div>
-            </Card>
-          )}
-        </Card>
 
-        {/* Frame Limit Toggle */}
-        <Card className="bg-gradient-to-r from-orange-50 to-orange-100 dark:from-orange-900/20 dark:to-orange-800/20">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
-            <h3 className="text-lg font-semibold text-orange-700 dark:text-orange-300">Frame Limit</h3>
-          </div>
-          
-          <div className="flex items-center gap-4 mb-4">
-            <ToggleSwitch
-              checked={frameSelection.useFrameLimit}
-              onChange={handleFrameLimitToggle}
-              label={frameSelection.useFrameLimit ? 'Limit number of frames' : 'Extract without limit'}
-            />
             <div>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                {frameSelection.useFrameLimit 
-                  ? 'Set a maximum number of frames to extract' 
-                  : 'Extract all frames matching your criteria'
-                }
-              </p>
+                <Label htmlFor="end" className="flex items-center gap-2 mb-2 justify-end text-right">
+                End {useTimeFormat ? 'Time' : 'Frame'}
+                <ArrowLeftFromLine className="w-4 h-4" />
+                </Label>
+                {useTimeFormat ? (
+                <div>
+                  <TextInput
+                  id="end"
+                  type="text"
+                  value={formatTime(frameSelection.endTime)}
+                  onChange={(e) => handleTimeChange('endTime', e.target.value)}
+                  placeholder={formatTime(videoMetadata.duration)}
+                  color={frameSelection.endTime < frameSelection.startTime ? 'failure' : 'gray'}
+                    />
+                </div>
+                ) : (
+                <div>
+                  <TextInput
+                  id="end"
+                  type="number"
+                  min="0"
+                  max={maxFrames}
+                  value={endFrame}
+                  onChange={(e) => handleFrameChange('endFrame', e.target.value)}
+                  placeholder={maxFrames.toString()}
+                  color={frameSelection.endFrame < frameSelection.startFrame ? 'failure' : 'gray'}
+                  />
+                </div>
+                )}
+  
             </div>
           </div>
-          
-          {frameSelection.useFrameLimit && (
-            <Card className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-              <Label htmlFor="frameLimit" className="mb-2">
-                Maximum number of frames
-              </Label>
-              <TextInput
-                id="frameLimit"
-                type="number"
-                min="1"
-                value={frameSelection.frameLimit || ''}
-                onChange={(e) => handleFrameLimitChange(e.target.value)}
-                placeholder="100"
-              />
-            </Card>
-          )}
-        </Card>
-
-        {/* Preview Info */}
-        <Card className="bg-gradient-to-r from-cyan-50 to-cyan-100 dark:from-cyan-900/20 dark:to-cyan-800/20">
+        </div>
+        <DualRangeSlider
+            min={0}
+            max={useTimeFormat ? videoMetadata.duration : maxFrames}
+            step={useTimeFormat ? 0.001 : 1}
+            value={useTimeFormat ? [frameSelection.startTime, frameSelection.endTime] : [frameSelection.startFrame, frameSelection.endFrame]}
+            onChange={(value) => {
+              if (useTimeFormat) {
+                updateFrameSelection({
+                  startTime: value[0],
+                  endTime: value[1],
+                  startFrame: timeToFrame(value[0]),
+                  endFrame: timeToFrame(value[1])
+                });
+              } else {
+                updateFrameSelection({
+                  startFrame: value[0],
+                  endFrame: value[1],
+                  startTime: frameToTime(value[0]),
+                  endTime: frameToTime(value[1])
+                });
+              }
+            }}
+            formatValue={useTimeFormat ? formatTime : (val) => val.toString()}
+            parseValue={useTimeFormat ? parseTime : (val) => parseInt(val) || 0}
+            color="blue"
+            showValues={true}
+          />
+        {/* Extraction Interval */}
+        <div className="space-y-4">          
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-cyan-100 dark:bg-cyan-800 rounded-full">
-              <Info className="w-5 h-5 text-cyan-600 dark:text-cyan-400" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-cyan-700 dark:text-cyan-300">Extraction Preview</p>
-              <p className="text-gray-600 dark:text-gray-400">
-                Estimated frames to extract:{' '}
-                <Badge color="info" className="ml-1">
-                  {totalFramesToExtract}
-                </Badge>
-              </p>
-            </div>
+            <span className="text-sm text-gray-600">Extract every</span>
+            <TextInput
+              type="number"
+              min="1"
+              value={frameSelection.intervalValue}
+              onChange={(e) => handleIntervalValueChange(e.target.value)}
+              sizing="sm"
+              style={{ width: '80px' }}
+              color={frameSelection.intervalValue <= 0 ? 'failure' : 'gray'}
+            />
+            <span className="text-sm text-gray-600">frames</span>
           </div>
-        </Card>
+          
+          {frameSelection.intervalValue <= 0 && (
+            <Alert color="failure" className="mt-2">
+              <span className="font-medium">Invalid interval!</span> Must be greater than 0.
+            </Alert>
+          )}
+        </div>
 
-        {/* Validation alert */}
+        {/* Frame Limit */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-gray-600">Up to</span>
+            <TextInput
+              type="number"
+              min="1"
+              max={maxFrames}
+              value={frameSelection.frameLimit}
+              onChange={(e) => handleFrameLimitChange(e.target.value)}
+              sizing="sm"
+              style={{ width: '80px' }}
+              color={frameSelection.frameLimit <= 0 || frameSelection.frameLimit > maxFrames ? 'failure' : 'gray'}
+            />
+            <span className="text-sm text-gray-600">frames (max: {maxFrames})</span>
+          </div>
+
+          {frameSelection.frameLimit <= 0 && (
+            <Alert color="failure" className="mt-2">
+              <span className="font-medium">Invalid limit!</span> Must be greater than 0.
+            </Alert>
+          )}
+          
+          {frameSelection.frameLimit > maxFrames && (
+            <Alert color="failure" className="mt-2">
+              <span className="font-medium">Limit too high!</span> Maximum is {maxFrames} frames.
+            </Alert>
+          )}
+        </div>
+
+        {/* Total Frames Display */}
+        <div className="bg-blue-50 p-4 rounded-lg">
+
+          <div className="text-2xl font-bold text-blue-600">
+            {isLimitActive ? `${Math.min(framesToExtractCalculated, frameSelection.frameLimit)}` : framesToExtractCalculated}
+            {isLimitActive && <span className="text-sm text-gray-500">/{framesToExtractCalculated} Frames to be extracted</span>}
+          </div>
+        </div>
+
+        {/* Validation Error */}
         {hasValidationError && (
-          <Alert color="failure" className="mt-4">
-            <span className="font-medium">Validation Error!</span>{' '}
-            Please check your frame selection settings. Ensure start frame is less than end frame and intervals are positive.
+          <Alert color="failure">
+            <span className="font-medium">Invalid settings!</span> Please check your frame selection settings.
           </Alert>
         )}
 
-        {/* Continue button */}
-        <div className="flex justify-end mt-6">
-          <Button 
-            color="blue"
-            size="lg"
-            disabled={hasValidationError}
-            onClick={() => {
-              setStepCompleted(2, true);
-              goToNextStep();
-            }}
-          >
-            Continue to Layout
-          </Button>
-        </div>
+        {/* Continue Button */}
+        <Button
+          onClick={handleContinue}
+          disabled={hasValidationError}
+          className="w-full"
+          size="lg"
+        >
+          Edit Layout
+        </Button>
       </div>
     </Card>
   );

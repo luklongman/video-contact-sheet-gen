@@ -13,20 +13,17 @@ export interface FrameSelectionSettings {
   endTime: number;
   startFrame: number;
   endFrame: number;
-  intervalMode: 'frames' | 'seconds';
   intervalValue: number;
-  frameLimit: number | null;
-  useFrameLimit: boolean;
+  frameLimit: number;
 }
 
 export interface LayoutSettings {
-  mode: 'dynamic' | 'fixed';
   columns: number;
-  rows?: number;
-  canvasWidth?: number;
-  canvasHeight?: number;
-  thumbnailWidth?: number;
-  padding: number;
+  rows: number;
+  thumbnailWidth: number;
+  thumbnailHeight: number;
+  borderSpacing: number;
+  filmSpacing: number;
   showBorder: boolean;
   borderThickness: number;
   borderColor: string;
@@ -54,10 +51,10 @@ export interface AppState {
   isAnalyzing: boolean;
   analysisError: string | null;
   
-  // Upload state
-  isUploading: boolean;
-  uploadProgress: number;
-  uploadStatus: string;
+  // Load state
+  isLoading: boolean;
+  loadProgress: number;
+  loadStatus: string;
   
   // Settings
   frameSelection: FrameSelectionSettings;
@@ -87,9 +84,9 @@ export interface AppState {
   setAnalyzing: (isAnalyzing: boolean) => void;
   setAnalysisError: (error: string | null) => void;
   
-  setUploading: (isUploading: boolean) => void;
-  setUploadProgress: (progress: number) => void;
-  setUploadStatus: (status: string) => void;
+  setLoading: (isLoading: boolean) => void;
+  setLoadProgress: (progress: number) => void;
+  setLoadStatus: (status: string) => void;
   
   updateFrameSelection: (settings: Partial<FrameSelectionSettings>) => void;
   updateLayout: (settings: Partial<LayoutSettings>) => void;
@@ -111,20 +108,17 @@ const initialFrameSelection: FrameSelectionSettings = {
   endTime: 0,
   startFrame: 0,
   endFrame: 0,
-  intervalMode: 'seconds',
   intervalValue: 30,
-  frameLimit: null,
-  useFrameLimit: false,
+  frameLimit: 100,
 };
 
 const initialLayout: LayoutSettings = {
-  mode: 'dynamic',
   columns: 4,
   rows: 5,
-  canvasWidth: 1920,
-  canvasHeight: 1080,
   thumbnailWidth: 300,
-  padding: 10,
+  thumbnailHeight: 169, // 16:9 aspect ratio
+  borderSpacing: 10,
+  filmSpacing: 0,
   showBorder: true,
   borderThickness: 2,
   borderColor: '#000000',
@@ -143,7 +137,7 @@ const initialOutput: OutputSettings = {
 export const useAppStore = create<AppState>((set, get) => ({
   // Initial state
   currentStep: 1,
-  stepsCompleted: [false, false, false, false, false],
+  stepsCompleted: [false, false, false, false],
   showHero: true,
   
   videoFile: null,
@@ -151,9 +145,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   isAnalyzing: false,
   analysisError: null,
   
-  isUploading: false,
-  uploadProgress: 0,
-  uploadStatus: '',
+  isLoading: false,
+  loadProgress: 0,
+  loadStatus: '',
   
   frameSelection: initialFrameSelection,
   layout: initialLayout,
@@ -176,7 +170,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   goToNextStep: () => {
     const currentStep = get().currentStep;
-    if (currentStep < 5) {
+    if (currentStep < 4) {
       set({ currentStep: currentStep + 1 });
     }
   },
@@ -185,24 +179,63 @@ export const useAppStore = create<AppState>((set, get) => ({
   setVideoFile: (file) => set({ videoFile: file }),
   setVideoMetadata: (metadata) => {
     set({ videoMetadata: metadata });
-    // Calculate total frames after setting metadata
+    // Calculate total frames directly without setTimeout
     if (metadata) {
-      setTimeout(() => get().calculateTotalFrames(), 0);
+      const { frameSelection } = get();
+      const startFrame = frameSelection.startFrame;
+      const endFrame = frameSelection.endFrame || Math.floor(metadata.duration * metadata.fps);
+      const totalFrames = endFrame - startFrame + 1;
+      
+      let framesToExtract = 0;
+      const useIntervalExtraction = frameSelection.intervalValue > 1;
+      
+      if (useIntervalExtraction) {
+        framesToExtract = Math.ceil(totalFrames / frameSelection.intervalValue);
+      } else {
+        framesToExtract = totalFrames;
+      }
+      
+      const maxFrames = Math.floor(metadata.duration * metadata.fps);
+      const actualFrameLimit = Math.min(frameSelection.frameLimit, maxFrames);
+      framesToExtract = Math.min(framesToExtract, actualFrameLimit);
+      
+      set({ totalFramesToExtract: framesToExtract });
     }
   },
   setAnalyzing: (isAnalyzing) => set({ isAnalyzing }),
   setAnalysisError: (error) => set({ analysisError: error }),
   
-  setUploading: (isUploading) => set({ isUploading }),
-  setUploadProgress: (progress) => set({ uploadProgress: progress }),
-  setUploadStatus: (status) => set({ uploadStatus: status }),
+  setLoading: (isLoading) => set({ isLoading }),
+  setLoadProgress: (progress) => set({ loadProgress: progress }),
+  setLoadStatus: (status) => set({ loadStatus: status }),
   
   updateFrameSelection: (settings) => {
     const currentSettings = get().frameSelection;
     const newSettings = { ...currentSettings, ...settings };
     set({ frameSelection: newSettings });
-    // Calculate total frames after state update
-    setTimeout(() => get().calculateTotalFrames(), 0);
+    
+    // Calculate total frames directly without setTimeout
+    const { videoMetadata } = get();
+    if (videoMetadata) {
+      const startFrame = newSettings.startFrame;
+      const endFrame = newSettings.endFrame || Math.floor(videoMetadata.duration * videoMetadata.fps);
+      const totalFrames = endFrame - startFrame + 1;
+      
+      let framesToExtract = 0;
+      const useIntervalExtraction = newSettings.intervalValue > 1;
+      
+      if (useIntervalExtraction) {
+        framesToExtract = Math.ceil(totalFrames / newSettings.intervalValue);
+      } else {
+        framesToExtract = totalFrames;
+      }
+      
+      const maxFrames = Math.floor(videoMetadata.duration * videoMetadata.fps);
+      const actualFrameLimit = Math.min(newSettings.frameLimit, maxFrames);
+      framesToExtract = Math.min(framesToExtract, actualFrameLimit);
+      
+      set({ totalFramesToExtract: framesToExtract });
+    }
   },
   
   updateLayout: (settings) => {
@@ -233,25 +266,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     let framesToExtract = 0;
     
     // Check if we're extracting every frame or using interval
-    const useIntervalExtraction = frameSelection.intervalMode === 'frames' ? 
-      frameSelection.intervalValue > 1 : 
-      frameSelection.intervalValue !== (1 / videoMetadata.fps);
+    const useIntervalExtraction = frameSelection.intervalValue > 1;
     
     if (useIntervalExtraction) {
-      if (frameSelection.intervalMode === 'frames') {
-        framesToExtract = Math.ceil(totalFrames / frameSelection.intervalValue);
-      } else {
-        const totalSeconds = totalFrames / videoMetadata.fps;
-        framesToExtract = Math.ceil(totalSeconds / frameSelection.intervalValue);
-      }
+      framesToExtract = Math.ceil(totalFrames / frameSelection.intervalValue);
     } else {
       // Extract every frame
       framesToExtract = totalFrames;
     }
     
-    if (frameSelection.useFrameLimit && frameSelection.frameLimit) {
-      framesToExtract = Math.min(framesToExtract, frameSelection.frameLimit);
-    }
+    const maxFrames = Math.floor(videoMetadata.duration * videoMetadata.fps);
+    const actualFrameLimit = Math.min(frameSelection.frameLimit, maxFrames);
+    framesToExtract = Math.min(framesToExtract, actualFrameLimit);
     
     set({ totalFramesToExtract: framesToExtract });
   },
@@ -264,12 +290,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     videoMetadata: null,
     isAnalyzing: false,
     analysisError: null,
-    isUploading: false,
-    uploadProgress: 0,
-    uploadStatus: '',
-    frameSelection: initialFrameSelection,
-    layout: initialLayout,
-    output: initialOutput,
+    isLoading: false,
+    loadProgress: 0,
+    loadStatus: '',
+    frameSelection: { ...initialFrameSelection },
+    layout: { ...initialLayout },
+    output: { ...initialOutput },
     isProcessing: false,
     processingProgress: 0,
     processingStatus: '',
